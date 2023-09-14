@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "boatrace-scraping"
+version = "0.1.0"
+description = ""
+authors = ["matsumaru-t <m-t2000@outlook.jp>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+flet = "^0.10.1"
+aiohttp = "^3.8.5"
+beautifulsoup4 = "^4.12.2"
+lxml = "^4.9.3"
+tqdm = "^4.66.1"
+pandas = "^2.1.0"
+
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
