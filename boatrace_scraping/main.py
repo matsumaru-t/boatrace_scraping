@@ -6,8 +6,6 @@ import flet as ft
 from data_fetcher import fetch_racedata
 from utils import race_range
 
-import pickle
-
 
 async def main(page: ft.Page) -> None:
     page.scroll = "auto"

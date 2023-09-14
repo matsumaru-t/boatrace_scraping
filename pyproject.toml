@@ -12,7 +12,6 @@ aiohttp = "^3.8.5"
 beautifulsoup4 = "^4.12.2"
 lxml = "^4.9.3"
 tqdm = "^4.66.1"
-pandas = "^2.1.0"
 pyinstaller = "^5.13.2"
 
 
