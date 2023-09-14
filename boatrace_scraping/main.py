@@ -42,17 +42,16 @@ async def main(page: ft.Page) -> None:
                 result = await asyncio.gather(*tasks)
 
         result = [r for r in result if r is not None]
-        with open("racedata.pkl", "wb") as f:
-            pickle.dump(result, f)
 
-        result_container.content = ft.Text(len(result))
+        result_container.content = ft.Text(f"{len(result)}件のデータを取得しました。")
 
         def save(e: ft.FilePickerResultEvent):
+            if e.path is None:
+                return
             if not e.path.endswith(".json"):
                 e.path += ".json"
             with open(e.path, "w") as f:
                 json.dump(result, f)
-            print("saved")
 
         picker = ft.FilePicker(on_result=save)
         page.overlay.append(picker)
