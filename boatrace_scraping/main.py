@@ -43,12 +43,9 @@ async def main(page: ft.Page) -> None:
             await update_pb()
             return task
 
-        timeout = aiohttp.ClientTimeout(total=30)
-        connector = aiohttp.TCPConnector(limit=100)
+        connector = aiohttp.TCPConnector(limit=35)
 
-        async with aiohttp.ClientSession(
-            timeout=timeout, connector=connector
-        ) as session:
+        async with aiohttp.ClientSession(connector=connector) as session:
             async with asyncio.TaskGroup() as tg:
                 tasks = [
                     tg.create_task(create_task(session, date, stage, race))

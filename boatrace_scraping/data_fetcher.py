@@ -49,16 +49,18 @@ class RaceData:
 
 
 async def fetch(
-    session: aiohttp.ClientSession, url: str, retries: int = 3
+    session: aiohttp.ClientSession, url: str, retries: int = 3, backoff: float = 0.5
 ) -> str | None:
     for i in range(retries):
         try:
             async with session.get(url) as response:
                 return await response.text()
-        except asyncio.TimeoutError:
+        except BaseException as e:
             if i == retries - 1:
+                print(f"{e=}, {url=}")
                 raise
-            await asyncio.sleep(1)
+            wait_time = backoff * 2 ** (i + 1)
+            await asyncio.sleep(wait_time)
 
 
 async def fetch_racedata(
@@ -82,7 +84,7 @@ async def fetch_racedata(
                 tg.create_task(fetch(session, f"{BASE_URL}/raceresult?{query_param}")),
             ]
         htmls = [task.result() for task in tasks]
-    except* asyncio.TimeoutError:
+    except* BaseException as e:
         htmls = None
 
     if htmls is None:
