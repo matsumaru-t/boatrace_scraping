@@ -17,31 +17,47 @@ async def main(page: ft.Page) -> None:
     end_textbox = ft.TextField(label="終了日", value="20210703")
 
     pb = ft.ProgressBar(width=400, value=0)
+    pb_counter = ft.Text("0/0")
     result_container = ft.Container()
 
     async def search(e) -> None:
         start, end = start_textbox.value, end_textbox.value
+        c = 0
+        d = len(race_range(start, end))
+        pb_counter.value = f"{c}/{d}"
         pb.value = 0
+
+        await pb_counter.update_async()
+        await pb.update_async()
+
+        async def update_pb():
+            nonlocal c
+            c += 1
+            pb_counter.value = f"{c}/{d}"
+            pb.value += 1 / d
+            await pb_counter.update_async()
+            await pb.update_async()
 
         async def create_task(session, date, stage, race):
             task = await fetch_racedata(session, date, stage, race)
-            pb.value += 1 / len(race_range(start, end))
-            await pb.update_async()
+            await update_pb()
             return task
 
-        timeout = aiohttp.ClientTimeout(total=60 * 60)
-        semaphore = asyncio.Semaphore(100)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with semaphore:
+        timeout = aiohttp.ClientTimeout(total=30)
+        connector = aiohttp.TCPConnector(limit=100)
+
+        async with aiohttp.ClientSession(
+            timeout=timeout, connector=connector
+        ) as session:
+            async with asyncio.TaskGroup() as tg:
                 tasks = [
-                    create_task(session, date, stage, race)
+                    tg.create_task(create_task(session, date, stage, race))
                     for date, stage, race in race_range(start, end)
                 ]
-                result = await asyncio.gather(*tasks)
 
-        result = [r for r in result if r is not None]
+        result = [r for task in tasks if (r := task.result()) is not None]
 
-        result_container.content = ft.Text(f"{len(result)}件のデータを取得しました。")
+        result_container.content = ft.Text(f"{d}件中{len(result)}件のデータを取得しました。")
 
         def save(e: ft.FilePickerResultEvent):
             if e.path is None:
@@ -56,7 +72,7 @@ async def main(page: ft.Page) -> None:
 
         await page.update_async()
         await picker.save_file_async(
-            dialog_title="保存先を選択してください", file_name="racedata.json"
+            dialog_title="保存先を選択してください", file_name=f"{start}-{end}.json"
         )
 
     search_button = ft.ElevatedButton("検索", icon="search", on_click=search)
@@ -75,6 +91,7 @@ async def main(page: ft.Page) -> None:
                     controls=[
                         search_button,
                         pb,
+                        pb_counter,
                     ]
                 ),
                 result_container,

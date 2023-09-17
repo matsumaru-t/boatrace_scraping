@@ -55,7 +55,7 @@ async def fetch(
         try:
             async with session.get(url) as response:
                 return await response.text()
-        except aiohttp.ClientError:
+        except asyncio.TimeoutError:
             if i == retries - 1:
                 raise
             await asyncio.sleep(1)
@@ -69,13 +69,40 @@ async def fetch_racedata(
 ) -> dict | None:
     query_param = f"rno={race:02}&jcd={stage:02}&hd={date}"
 
+    # WEBスクレイピング
+    try:
+        async with asyncio.TaskGroup() as tg:
+            tasks = [
+                tg.create_task(fetch(session, f"{BASE_URL}/racelist?{query_param}")),
+                tg.create_task(fetch(session, f"{BASE_URL}/odds3t?{query_param}")),
+                tg.create_task(fetch(session, f"{BASE_URL}/odds3f?{query_param}")),
+                tg.create_task(fetch(session, f"{BASE_URL}/odds2tf?{query_param}")),
+                tg.create_task(fetch(session, f"{BASE_URL}/oddsk?{query_param}")),
+                tg.create_task(fetch(session, f"{BASE_URL}/oddstf?{query_param}")),
+                tg.create_task(fetch(session, f"{BASE_URL}/raceresult?{query_param}")),
+            ]
+        htmls = [task.result() for task in tasks]
+    except* asyncio.TimeoutError:
+        htmls = None
+
+    if htmls is None:
+        return None
+
+    (
+        racelist_html,
+        odds3t_html,
+        odds3f_html,
+        odds2tf_html,
+        oddsk_html,
+        oddstf_html,
+        raceresult_html,
+    ) = htmls
+
     ########################################
     #                出走表                 #
     ########################################
 
-    url = f"{BASE_URL}/racelist?{query_param}"
-    html = await fetch(session, url)
-    soup = BeautifulSoup(html, "xml")
+    soup = BeautifulSoup(racelist_html, "xml")
 
     table = soup.select_one(".is-tableFixed__3rdadd table")
     if table is None:
@@ -180,14 +207,7 @@ async def fetch_racedata(
     ########################################
 
     odds = {}
-    urls = [
-        f"{BASE_URL}/odds3t?{query_param}",
-        f"{BASE_URL}/odds3f?{query_param}",
-        f"{BASE_URL}/odds2tf?{query_param}",
-        f"{BASE_URL}/oddsk?{query_param}",
-        f"{BASE_URL}/oddstf?{query_param}",
-    ]
-    htmls = await asyncio.gather(*[fetch(session, url) for url in urls])
+    htmls = [odds3t_html, odds3f_html, odds2tf_html, oddsk_html, oddstf_html]
     soup = BeautifulSoup(htmls[0], "xml")
 
     # 3連単
@@ -198,7 +218,6 @@ async def fetch_racedata(
         try:
             odds[f"(3t){i}-{j}-{k}"] = next(it)
         except StopIteration:
-            print("neko")
             return None
 
     # 3連複
@@ -267,9 +286,7 @@ async def fetch_racedata(
     #                払戻額                 #
     ########################################
 
-    url = f"{BASE_URL}/raceresult?{query_param}"
-    html = await fetch(session, url)
-    soup = BeautifulSoup(html, "xml")
+    soup = BeautifulSoup(raceresult_html, "xml")
 
     try:
         table = soup.find(string="勝式").find_parent("table")
