@@ -4,7 +4,7 @@ import json
 import aiohttp
 import flet as ft
 from data_fetcher import fetch_racedata
-from utils import race_range
+from utils import HTTPClient, race_range
 
 
 async def main(page: ft.Page) -> None:
@@ -38,21 +38,23 @@ async def main(page: ft.Page) -> None:
             await pb_counter.update_async()
             await pb.update_async()
 
-        async def create_task(session, date, stage, race):
-            task = await fetch_racedata(session, date, stage, race)
+        async def create_task(client, date, stage, race):
+            task = await fetch_racedata(client, date, stage, race)
             await update_pb()
             return task
 
-        connector = aiohttp.TCPConnector(limit=35)
+        async with aiohttp.ClientSession() as session:
+            client = HTTPClient(session, parallel=30)
+            tasks = [
+                create_task(client, date, stage, race)
+                for date, stage, race in race_range(start, end)
+            ]
 
-        async with aiohttp.ClientSession(connector=connector) as session:
-            async with asyncio.TaskGroup() as tg:
-                tasks = [
-                    tg.create_task(create_task(session, date, stage, race))
-                    for date, stage, race in race_range(start, end)
-                ]
-
-        result = [r for task in tasks if (r := task.result()) is not None]
+            result = [
+                r
+                for task in asyncio.as_completed(tasks)
+                if (r := await task) is not None
+            ]
 
         result_container.content = ft.Text(f"{d}件中{len(result)}件のデータを取得しました。")
 

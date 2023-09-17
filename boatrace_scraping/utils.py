@@ -1,5 +1,8 @@
+import asyncio
 from datetime import date, timedelta
 from typing import Sequence
+
+import aiohttp
 
 
 def to_float(s: str) -> float:
@@ -26,3 +29,31 @@ class race_range(Sequence[tuple[str, int, int]]):
 
     def __len__(self) -> int:
         return (self.end_date - self.start_date).days * 24 * 12
+
+
+class HTTPClient:
+    def __init__(self, session: aiohttp.ClientSession, parallel: int = 10) -> None:
+        self.session = session
+        self.semaphore = asyncio.Semaphore(parallel)
+
+    async def fetch(self, url: str) -> str | None:
+        try:
+            async with self.semaphore:
+                async with self.session.get(url) as response:
+                    return await response.text()
+        except aiohttp.ClientError:
+            return None
+
+    async def fetch_all(self, urls: list[str]) -> list[str | None]:
+        return await asyncio.gather(*[self.fetch(url) for url in urls])
+
+
+async def main():
+    async with aiohttp.ClientSession() as session:
+        client = HTTPClient(session)
+        htmls = await client.fetch_all(["https://google.com"] * 10)
+        print(*[type(html) for html in htmls])
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

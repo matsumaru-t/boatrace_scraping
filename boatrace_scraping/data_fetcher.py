@@ -1,110 +1,29 @@
-import asyncio
-from dataclasses import dataclass, asdict
+from dataclasses import asdict
 from itertools import combinations, permutations
 
-import aiohttp
 from bs4 import BeautifulSoup
-from utils import to_float
+from models import RaceData, RacerInfo, Ticket
+from utils import HTTPClient, to_float
 
 BASE_URL = "https://www.boatrace.jp/owpc/pc/race"
 
 
-@dataclass
-class RacerInfo:
-    rid: int
-    grade: int
-    age: int
-    weight: float
-    f_num: int
-    l_num: int
-    st_mean: float
-    top1_national: float
-    top2_national: float
-    top3_national: float
-    top1_local: float
-    top2_local: float
-    top3_local: float
-    mortor_no: int
-    top2_mortor: float
-    top3_mortor: float
-    boat_no: int
-    top2_boat: float
-    top3_boat: float
-
-
-@dataclass
-class Ticket:
-    name: str
-    odds: float
-    payout: float
-
-
-@dataclass
-class RaceData:
-    date: str
-    stage: int
-    race: int
-    racers: list[RacerInfo]
-    tickets: list[Ticket]
-
-
-async def fetch(
-    session: aiohttp.ClientSession, url: str, retries: int = 3, backoff: float = 0.5
-) -> str | None:
-    for i in range(retries):
-        try:
-            async with session.get(url) as response:
-                return await response.text()
-        except BaseException as e:
-            if i == retries - 1:
-                print(f"{e=}, {url=}")
-                raise
-            wait_time = backoff * 2 ** (i + 1)
-            await asyncio.sleep(wait_time)
-
-
-async def fetch_racedata(
-    session: aiohttp.ClientSession,
-    date: str,
-    stage: int,
-    race: int,
-) -> dict | None:
+def generate_urls(date: str, stage: int, race: int) -> list[str]:
     query_param = f"rno={race:02}&jcd={stage:02}&hd={date}"
+    urls = [
+        f"{BASE_URL}/racelist?{query_param}",
+        f"{BASE_URL}/odds3t?{query_param}",
+        f"{BASE_URL}/odds3f?{query_param}",
+        f"{BASE_URL}/odds2tf?{query_param}",
+        f"{BASE_URL}/oddsk?{query_param}",
+        f"{BASE_URL}/oddstf?{query_param}",
+        f"{BASE_URL}/raceresult?{query_param}",
+    ]
+    return urls
 
-    # WEBスクレイピング
-    try:
-        async with asyncio.TaskGroup() as tg:
-            tasks = [
-                tg.create_task(fetch(session, f"{BASE_URL}/racelist?{query_param}")),
-                tg.create_task(fetch(session, f"{BASE_URL}/odds3t?{query_param}")),
-                tg.create_task(fetch(session, f"{BASE_URL}/odds3f?{query_param}")),
-                tg.create_task(fetch(session, f"{BASE_URL}/odds2tf?{query_param}")),
-                tg.create_task(fetch(session, f"{BASE_URL}/oddsk?{query_param}")),
-                tg.create_task(fetch(session, f"{BASE_URL}/oddstf?{query_param}")),
-                tg.create_task(fetch(session, f"{BASE_URL}/raceresult?{query_param}")),
-            ]
-        htmls = [task.result() for task in tasks]
-    except* BaseException as e:
-        htmls = None
 
-    if htmls is None:
-        return None
-
-    (
-        racelist_html,
-        odds3t_html,
-        odds3f_html,
-        odds2tf_html,
-        oddsk_html,
-        oddstf_html,
-        raceresult_html,
-    ) = htmls
-
-    ########################################
-    #                出走表                 #
-    ########################################
-
-    soup = BeautifulSoup(racelist_html, "xml")
+def parse_racelist(html: str) -> list[RacerInfo] | None:
+    soup = BeautifulSoup(html, "xml")
 
     table = soup.select_one(".is-tableFixed__3rdadd table")
     if table is None:
@@ -204,12 +123,11 @@ async def fetch_racedata(
             )
         )
 
-    ########################################
-    #                オッズ                 #
-    ########################################
+    return racers
 
+
+def parse_odds(htmls: list[str]) -> dict[str, float] | None:
     odds = {}
-    htmls = [odds3t_html, odds3f_html, odds2tf_html, oddsk_html, oddstf_html]
     soup = BeautifulSoup(htmls[0], "xml")
 
     # 3連単
@@ -284,11 +202,11 @@ async def fetch_racedata(
         except StopIteration:
             return None
 
-    ########################################
-    #                払戻額                 #
-    ########################################
+    return odds
 
-    soup = BeautifulSoup(raceresult_html, "xml")
+
+def parse_raceresult(html: str) -> dict[str, float] | None:
+    soup = BeautifulSoup(html, "xml")
 
     try:
         table = soup.find(string="勝式").find_parent("table")
@@ -332,8 +250,30 @@ async def fetch_racedata(
                 payout[f"(t){numset}"] = val
             case "複勝":
                 payout[f"(f){numset}"] = val
+
+    return payout
+
+
+async def fetch_racedata(
+    client: HTTPClient,
+    date: str,
+    stage: int,
+    race: int,
+) -> dict | None:
+    urls = generate_urls(date, stage, race)
+
+    racelist_html, *odds_html, raceresult_html = await client.fetch_all(urls)
+
+    racers = parse_racelist(racelist_html)
+    odds_dict = parse_odds(odds_html)
+    payout_dict = parse_raceresult(raceresult_html)
+
+    if racers is None or odds_dict is None or payout_dict is None:
+        return None
+
     tickets = [
-        Ticket(name=name, odds=odds[name], payout=payout[name]) for name in odds.keys()
+        Ticket(name=name, odds=odds_dict[name], payout=payout_dict[name])
+        for name in odds_dict.keys()
     ]
 
     return asdict(
